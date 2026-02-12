@@ -1,0 +1,149 @@
+from krita import *
+import os
+import json
+import zipfile
+from io import BytesIO
+import tempfile
+
+
+class MultiExport(Extension):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+    def setup(self):
+        pass
+
+    def createActions(self, window):
+        # Existing multi-export
+        action = window.createAction(
+            "multi_export",
+            "Multi Export (PNG, JPG, WebP, AVIF)",
+            "tools/scripts"
+        )
+        action.triggered.connect(self.export_all)
+
+        # New LayerZip export
+        action_lzip = window.createAction(
+            "export_layerzip",
+            "Export as LayerZip (.lzip)",
+            "tools/scripts"
+        )
+        action_lzip.triggered.connect(self.export_layerzip)
+
+    def export_all(self):
+        doc = Krita.instance().activeDocument()
+        if not doc:
+            return
+
+        if not doc.fileName():
+            doc.saveAs()
+            if not doc.fileName():
+                return
+
+        doc.save()
+
+        full_path = doc.fileName()
+        folder = os.path.dirname(full_path)
+        base_name = os.path.splitext(os.path.basename(full_path))[0]
+
+        formats = ["png", "jpg", "webp", "avif"]
+
+        for fmt in formats:
+            output_path = os.path.join(folder, f"{base_name}.{fmt}")
+            info = InfoObject()
+            info.setProperty("quality", 90)
+            doc.exportImage(output_path, info)
+
+        print("Multi-format export complete.")
+
+    # ---------------- LayerZip export ----------------
+    def export_layerzip(self):
+        doc = Krita.instance().activeDocument()
+        if not doc:
+            return
+
+        if not doc.fileName():
+            doc.saveAs()
+            if not doc.fileName():
+                return
+
+        doc.save()
+        full_path = doc.fileName()
+        folder = os.path.dirname(full_path)
+        base_name = os.path.splitext(os.path.basename(full_path))[0]
+        lzip_path = os.path.join(folder, f"{base_name}.lzip")
+
+        # Export layer as full-canvas PNG using a temporary doc
+        tmp_doc = Krita.instance().createDocument(
+            doc.width(), doc.height(), "tmp", doc.colorModel(),
+            doc.colorDepth(), doc.colorProfile(), doc.resolution())
+        tmp_doc.setBatchmode(True)
+
+        # In-memory zip
+        mem_zip = BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Build JSON config
+            layers_json = {"layers": [], "width": doc.width(), "height": doc.height()}
+            for node in doc.topLevelNodes():
+                res = process_layer(node, [], tmp_doc, zf)
+                if res:
+                    layers_json["layers"].append(res)
+
+            zf.writestr("lzip.conf.json", json.dumps(layers_json, indent=2))
+        tmp_doc.close()
+
+        with open(lzip_path, "wb") as f:
+            f.write(mem_zip.getvalue())
+
+        print(f"LayerZip export complete: {lzip_path}")
+
+    pass
+
+
+def process_layer(node, path_list, tmp_doc, zf):
+    node_name = node.name()
+    file_name_safe = node_name.replace(" ", "_") + ".png"
+    if node.type() == "grouplayer":
+        layers_list = []
+        for child in node.childNodes():
+            child_res = process_layer(child, path_list + [node_name], tmp_doc, zf)
+            if child_res:
+                layers_list.append(child_res)
+        return {"name": node_name, "layers": layers_list}
+    elif node.type() in ("paintlayer", "vectorlayer"):
+        export_path = "/".join(path_list + [file_name_safe])
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        if True:
+            tmp_name = tmp.name  # save the filename
+            tmp_node = node.clone()
+            tmp_doc.rootNode().addChildNode(tmp_node, None)
+            info = InfoObject()
+            info.setProperty("quality", 100)
+            info.setProperty("alpha", True)
+            """
+            info.setProperty("compression", 9)
+            info.setProperty("forceSRGB", True)
+            info.setProperty("indexed", False)
+            info.setProperty("interlaced", False)
+            info.setProperty("saveSRGBProfile", False)
+            """
+        tmp.close()
+
+        success = tmp_doc.exportImage(tmp_name, info)
+        if not success: raise Exception ('success isnt True')
+
+        with open(tmp_name, "rb") as f:
+            readf = f.read()
+        os.remove(tmp_name)
+        # Read the PNG and write into ZIP
+        zf.writestr(export_path, readf)
+        tmp_node.remove()
+        raise Exception(readf[0:70])
+        return export_path
+    else:
+        return None
+    pass
+
+
+# Add the extension
+Krita.instance().addExtension(MultiExport(Krita.instance()))
