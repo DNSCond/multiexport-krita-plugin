@@ -4,6 +4,7 @@ import json
 import zipfile
 from io import BytesIO
 import tempfile
+import re
 
 
 class MultiExport(Extension):
@@ -85,10 +86,9 @@ class MultiExport(Extension):
             # Build JSON config
             layers_json = {"layers": [], "width": doc.width(), "height": doc.height()}
             for node in doc.topLevelNodes():
-                res = process_layer(node, [], tmp_doc, zf)
+                res = process_layer(node, list(), tmp_doc, zf)
                 if res:
                     layers_json["layers"].append(res)
-
             zf.writestr("lzip.conf.json", json.dumps(layers_json, indent=2))
         tmp_doc.close()
 
@@ -102,7 +102,7 @@ class MultiExport(Extension):
 
 def process_layer(node, path_list, tmp_doc, zf):
     node_name = node.name()
-    file_name_safe = node_name.replace(" ", "_") + ".png"
+    file_name_safe = sanitize_name(node_name) + ".png"
     if node.type() == "grouplayer":
         layers_list = []
         for child in node.childNodes():
@@ -138,12 +138,13 @@ def process_layer(node, path_list, tmp_doc, zf):
         # Read the PNG and write into ZIP
         zf.writestr(export_path, readf)
         tmp_node.remove()
-        raise Exception(readf[0:70])
         return export_path
     else:
         return None
     pass
 
+def sanitize_name(strx):
+    return re.sub('[/\\[\\]\\\\/<>?*^"| ]', '_', strx)
 
 # Add the extension
 Krita.instance().addExtension(MultiExport(Krita.instance()))
