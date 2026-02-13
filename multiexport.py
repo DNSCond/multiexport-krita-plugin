@@ -48,13 +48,15 @@ class MultiExport(Extension):
         folder = os.path.dirname(full_path)
         base_name = os.path.splitext(os.path.basename(full_path))[0]
 
-        formats = ["png", "jpg", "webp", "avif"]
+        formats = ["png", "jpg", "webp", "avif"]; tmp_doc = doc
 
+        tmp_doc.setBatchmode(True)
         for fmt in formats:
             output_path = os.path.join(folder, f"{base_name}.{fmt}")
             info = InfoObject()
             info.setProperty("quality", 90)
             doc.exportImage(output_path, info)
+        tmp_doc.setBatchmode(False)
 
         print("Multi-format export complete.")
 
