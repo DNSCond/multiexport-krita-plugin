@@ -26,7 +26,7 @@ class MultiExport(Extension):
         # LayerZip export
         action_lzip = window.createAction(
             "export_layerzip",
-            "Export as LayerZip (.lzip)",
+            "Export as LayerZip (.lzp)",
             "tools/scripts"
         )
         action_lzip.triggered.connect(self.export_layerzip)
@@ -74,9 +74,9 @@ class MultiExport(Extension):
 
         folder = os.path.dirname(doc.fileName())
         base_name = os.path.splitext(os.path.basename(doc.fileName()))[0]
-        lzip_path = os.path.join(folder, f"{base_name}.lzip")
+        lzip_path = os.path.join(folder, f"{base_name}.zip")
 
-        mem_zip = BytesIO()
+        mem_zip = BytesIO(); layer_save = dict(layer_save=0)
 
         with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             layers_json = {
@@ -86,7 +86,7 @@ class MultiExport(Extension):
             }
 
             for node in doc.topLevelNodes():
-                result = process_layer(node, [], doc, zf)
+                result = process_layer(node, [], doc, zf, layer_save)
                 if result:
                     layers_json["layers"].append(result)
 
@@ -104,18 +104,23 @@ class MultiExport(Extension):
 
 
 # ---------------- Layer Processing ----------------
-def process_layer(node, path_list, source_doc, zf):
+def process_layer(node, path_list, source_doc, zf, layer_save):
+    layer_save['layer_save'] += 1
     node_name = node.name()
-    safe_name = sanitize_name(node_name)
+    safe_name = sanitize_name(node_name) + f'_' + str(layer_save['layer_save']) + 'n'
+    common_node_attributes = dict(visibility=node.visible(), locked=node.locked(), opacity=node.opacity() / 255)
 
     if node.type() == "grouplayer":
+        export_path = "/".join(path_list + [safe_name])
         group_data = {
-            "name": node_name,
-            "layers": []
-        }
+            "type": node.type(),
+            "name": (node_name),
+            "path": export_path,
+            "layers": list(),
+        } | common_node_attributes
 
         for child in node.childNodes():
-            child_result = process_layer(child, path_list + [safe_name], source_doc, zf)
+            child_result = process_layer(child, path_list + [safe_name], source_doc, zf, layer_save)
             if child_result:
                 group_data["layers"].append(child_result)
 
@@ -165,7 +170,7 @@ def process_layer(node, path_list, source_doc, zf):
         restore_visibility(visibility_map)
         #source_doc.refreshProjection()
 
-        return export_path
+        return dict(type=node.type(), path=export_path, name=node_name) | common_node_attributes
 
     else:
         return None
@@ -173,7 +178,7 @@ def process_layer(node, path_list, source_doc, zf):
 
 # ---------------- Utilities ----------------
 def sanitize_name(name):
-    return re.sub(r'[\/\[\]\\<>?*^"| ]', '_', name)
+    return re.sub(r'[\/\[\]\\<>?*^"| :]', '_', name)
 
 
 def save_visibility_recursive(node, vis_map):
