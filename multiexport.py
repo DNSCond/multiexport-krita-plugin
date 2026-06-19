@@ -23,6 +23,14 @@ class MultiExport(Extension):
         )
         action.triggered.connect(self.export_all)
 
+        
+        action = window.createAction(
+            "multi_export_no_legacy",
+            "Multi Export (WebP, AVIF)",
+            "tools/scripts"
+        )
+        action.triggered.connect(self.export_modern)
+
         # LayerZip export
         action_lzip = window.createAction(
             "export_layerzip",
@@ -33,6 +41,12 @@ class MultiExport(Extension):
 
     # ---------------- Multi Export ----------------
     def export_all(self):
+        self.perform_export(("png", "jpg", "webp", "avif"))
+
+    def export_modern(self):
+        self.perform_export(("webp", "avif"))
+
+    def perform_export(self, formats):
         doc = Krita.instance().activeDocument()
         if not doc:
             return
@@ -48,7 +62,7 @@ class MultiExport(Extension):
         folder = os.path.dirname(full_path)
         base_name = os.path.splitext(os.path.basename(full_path))[0]
 
-        formats = ["png", "jpg", "webp", "avif"]; tmp_doc = doc
+        tmp_doc = doc
 
         tmp_doc.setBatchmode(True)
         for fmt in formats:
