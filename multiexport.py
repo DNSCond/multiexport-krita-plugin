@@ -1,11 +1,68 @@
-from krita import *
-import os
-import json
-import zipfile
+import os, json, zipfile, tempfile, re
 from io import BytesIO
-import tempfile
-import re
+from krita import *
 
+def check_has_night_layer(node):
+    name = node.name().lower()
+    if name.startswith("night;"):
+        return True
+    for child in node.childNodes():
+        if check_has_night_layer(child):
+            return True
+    return False
+
+
+def prepare_night_visibility(node):
+    name = node.name().lower()
+    
+    # Hide day layers
+    if name.startswith("day;"):
+        node.setVisible(False)
+        
+    # Force night layers to be visible
+    elif name.startswith("night;"):
+        node.setVisible(True)
+        
+        # Ensure parent groups are also visible so the night layer isn't hidden
+        parent = node.parentNode()
+        while parent and parent.type() != "root":
+            if parent.name().lower().startswith("day;"):
+                break
+            parent.setVisible(True)
+            parent = parent.parentNode()
+
+    # Recurse through all child nodes
+    for child in node.childNodes():
+        prepare_night_visibility(child)
+
+
+def export_night_avif(doc, folder, base_name):
+    # Only proceed if at least one layer starts with "night;"
+    has_night = any(check_has_night_layer(node) for node in doc.topLevelNodes())
+    if not has_night:
+        return
+
+    # Save original visibility states
+    vis_map = dict()
+    for node in doc.topLevelNodes():
+        save_visibility_recursive(node, vis_map)
+
+    # Apply night mode visibilities
+    for node in doc.topLevelNodes():
+        prepare_night_visibility(node)
+
+    doc.refreshProjection()
+
+    # Export AVIF image
+    night_output_path = os.path.join(folder, f"{base_name}-night.avif")
+    info = InfoObject()
+    info.setProperty("quality", 90)
+    doc.exportImage(night_output_path, info)
+
+    # Restore original visibility state
+    restore_visibility(vis_map)
+    doc.refreshProjection()
+pass
 
 class MultiExport(Extension):
     def __init__(self, parent):
@@ -18,7 +75,7 @@ class MultiExport(Extension):
         # Multi-export
         action = window.createAction(
             "multi_export",
-            "Multi Export (PNG, JPG, WebP, AVIF)",
+            "Multi Export (PNG, JPG, WEBP, AVIF)",
             "tools/scripts"
         )
         action.triggered.connect(self.export_all)
@@ -26,7 +83,7 @@ class MultiExport(Extension):
         
         action = window.createAction(
             "multi_export_no_legacy",
-            "Multi Export (WebP, AVIF)",
+            "Multi Export (WEBP, AVIF)",
             "tools/scripts"
         )
         action.triggered.connect(self.export_modern)
@@ -70,6 +127,9 @@ class MultiExport(Extension):
             info = InfoObject()
             info.setProperty("quality", 90)
             doc.exportImage(output_path, info)
+
+        export_night_avif(doc, folder, base_name)
+
         tmp_doc.setBatchmode(False)
 
         print("Multi-format export complete.")
